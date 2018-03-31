@@ -1,0 +1,92 @@
+syntax = "proto2";
+// option cc_api_version = 2;
+// option py_api_version = 2;
+
+package ncc;
+
+enum TokenKind {
+  Null = 0;
+  Token = 1;
+  Entity = 2;
+  Phrase = 3;
+  Type = 4;
+  Hyp = 5;
+}
+
+message VocabWord {
+  optional string word = 1;
+  optional int32 wid = 2;
+  // Count in training corpus.
+  optional float count = 3;
+  // Slots in unigram sampler table.
+  optional int32 slots = 4;
+  // Kind of vocabulary entry.
+  optional TokenKind kind = 5;
+  // In case the "word" is just a word, optionally include hypernyms.
+  repeated string hypernyms = 6;
+}
+
+/**
+ * Token sequence from one alphabetized sentence.
+ * Plus any spans that have special meaning, e.g., a KG entity, or a phrase.
+ */
+message DocTokEnt {
+  optional string docid = 1;
+  // Sequence of SAFT tokens, alphabetized.
+  repeated int32 tok_ids = 2 [packed = true];
+  // Three aligned arrays...
+  // Token offset where mention begins, inclusive.
+  repeated int32 ent_begins = 3 [packed = true];
+  // Token offset where mention ends, inclusive.
+  repeated int32 ent_ends = 4 [packed = true];
+  // Entity ID, alphabetized.
+  repeated int32 ent_ids = 5 [packed = true];
+}
+
+/**
+ * Training instance. Only positive context samples.
+ * Multiple positive context tokens passed because we may need to sample
+ * a single value of a latent variable at the focus, to use with all context
+ * tokens.  (Therefore, cannot use pair<int, int> as training unit.)
+ */
+message TrainWork {
+  optional int32 focus_tid = 1;
+  optional TokenKind focus_kind = 2;
+  repeated int32 context_tids = 3 [packed = true];
+  repeated TokenKind context_kinds = 4 [packed = true];  // expected all Token
+}
+
+/**
+ * IDs in alphabet for a phrase and all constituent words, plus the label.
+ * Match the ID with wid in VocabWord table to get word and phrase details.
+ */
+message PhraseInstance {
+  // Tratz-Hovy label.
+  optional string th_label = 1;
+  // Rating of non-compositionality, usually in [0, 1].
+  optional float noncomp_label = 2;
+  optional int32 phrase_wid = 3;
+  repeated int32 word_wids = 4;
+}
+
+/**
+ * Default hyperparameters and other configuration for constructor use.
+ * Yes, required.
+ */
+message Config {
+  required float unipower = 1 [default=0.75];
+  required int32 dim = 2      [default=100];
+  required int32 window = 3   [default=5];
+  required int32 neg = 4      [default=5];
+  required float step = 5     [default=0.025];
+  required int32 epochs = 6   [default=1];
+  required int32 slots = 7    [default=100000000];
+  required int32 debug = 999  [default=0];
+}
+
+/**
+ * Parts of model not written out as embedding vectors.
+ */
+message ModelParts {
+  optional float radius = 1;
+}
