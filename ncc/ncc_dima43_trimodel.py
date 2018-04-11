@@ -47,11 +47,12 @@ class NccDiscrepancy(NonComp):
 	self.model_name = 'glove_wikipedia_300.tf'
 	self.loadThCompoundsCsv(self.phrasesPath)
 	self.makeFoldsCompounds()
-	self.autoencodings = self.encodeEmbeddings(self.trainIds)
-	exit(0)
+	self.encodeEmbeddings()
+	print("Encodings are made")
         logging.info('phrasesDir=%s', self.phrasesDir)
         # first load CSV and split train test
-        #self.buildLossDima43()
+	self.embedstf = tf.Variable(self.place, name='embedstf', trainable=False)
+        self.buildLossDima43()
 	print "Done"
         logging.info('End %s.__init__', NccDiscrepancy.__name__)
 
@@ -92,21 +93,6 @@ class NccDiscrepancy(NonComp):
 	    print classtoids
 	    print "Found ",str(self.numDatInst)," from ",str(self.numInst)
 
-
-    def encodeEmbeddings(self, rowids):
-	batchsize = 30
-	encodeSize = self.numClasses
-	maxIter = 200000
-	modelpath = "/mnt/c/Users/srdeshp/Desktop/MLApps/Relational-Classifier/Embeddings/Encoded"
-
-	embeddingsToEncode = []
-
-	for i in rowids:
-		embeddingsToEncode.append(np.concatenate((self.embeds[self.allw1[i]],self.embeds[self.allw2[i]])))
-
-	inputSize = len(embeddingsToEncode[0])
-	return self.autoEncode(embeddingsToEncode,batchsize,inputSize,encodeSize,maxIter,modelpath)
-
     
     def makeFoldsCompounds(self): # To make train and test folds : Improved Sampling
 	ind = list(xrange(self.numDatInst))
@@ -141,27 +127,39 @@ class NccDiscrepancy(NonComp):
 	print len(de)
 	print len(ap)
 	self.trainIds = le
+	self.devIds = de
+	self.testIds = ap 
 	self.clW1, self.clW2, self.clW12, self.clY = [self.allw1[x] for x in le], [self.allw2[x] for x in le], [self.allw12[x] for x in le], [self.ally[x] for x in le]
 	self.cdW1, self.cdW2, self.cdW12, self.cdY = [self.allw1[x] for x in de], [self.allw2[x] for x in de], [self.allw12[x] for x in de], [self.ally[x] for x in de]
 	self.caW1, self.caW2, self.caW12, self.caY = [self.allw1[x] for x in ap], [self.allw2[x] for x in ap], [self.allw12[x] for x in ap], [self.ally[x] for x in ap]
 	print "Folding Finished"
-
-    def getRandomCompMiniBatch(self, batchSize=28):
-        sample = np.random.randint(0, len(self.clY), batchSize)
-        sWid1 = [self.clW1[x] for x in sample]
-        sWid2 = [self.clW2[x] for x in sample]
-	sWid12 = [self.clW12[x] for x in sample]
-        sY = [self.clY[x] for x in sample]
-        return sWid1, sWid2, sWid12, sY
 
     def generateSamplesToAutoEncode(self,points,batchSize):
 	sample = np.random.randint(0,len(points),batchSize)
 	retdata = [points[x] for x in sample]
 	return retdata
 
+    def encodeEmbeddings(self):
+	batchsize = 30
+	encodeSize = self.numClasses
+	maxIter = 200000
+	modelpath = "/mnt/c/Users/srdeshp/Desktop/MLApps/Relational-Classifier/Embeddings/Encoded"
+
+	embeddingsToEncode = []
+
+	for i in self.trainIds:
+		embeddingsToEncode.append(np.concatenate((self.embeds[self.allw1[i]],self.embeds[self.allw2[i]])))
+
+	inputSize = len(embeddingsToEncode[0])
+	encodings = self.autoEncode(embeddingsToEncode,batchsize,inputSize,encodeSize,maxIter,modelpath)
+	i=0
+	self.autoencodingsDict = {}
+	for r in self.trainIds:
+		self.autoencodingsDict[r] = encodings[i]
+ 
     def autoEncode(self, points, batchSize, inputSize, encodeSize, maxIter, modelpath):
 
-	inputEmb = tf.placeholder(tf.float32, shape=[None,inputSize])
+	self.inputEmb = tf.placeholder(tf.float32, shape=[None,inputSize])
 
 	hiddenlayerSize = 100
 
@@ -175,12 +173,12 @@ class NccDiscrepancy(NonComp):
 	b_out = tf.Variable(tf.random_normal(shape=[inputSize], mean=0, stddev=0.1))
 
 	#neural constuction
-	tfencoded_hidden_in = tf.map_fn(tf.sigmoid,tf.matmul(inputEmb,W_in) + b_in)
-	tf_encoded = tf.matmul(tfencoded_hidden_in,W_hidden_in) + b_hidden_in
-	tfencoded_hidden_out = tf.map_fn(tf.sigmoid,tf.matmul(tf_encoded,W_hidden_out) + b_hidden_out)
+	tfencoded_hidden_in = tf.map_fn(tf.nn.relu,tf.matmul(self.inputEmb,W_in) + b_in)
+	self.tf_encoded = tf.matmul(tfencoded_hidden_in,W_hidden_in) + b_hidden_in
+	tfencoded_hidden_out = tf.map_fn(tf.nn.relu,tf.matmul(self.tf_encoded,W_hidden_out) + b_hidden_out)
 	reconstructed = tf.matmul(tfencoded_hidden_out,W_out) + b_out
 
-	recon_loss = tf.reduce_sum(pow((inputEmb-reconstructed),2))
+	recon_loss = tf.reduce_sum(pow((self.inputEmb-reconstructed),2))
 
 	trainop_encode = tf.train.AdamOptimizer(.01).minimize(recon_loss)
 	initop_encode = tf.initialize_all_variables()
@@ -205,8 +203,8 @@ class NccDiscrepancy(NonComp):
 		save_path = saver_encode.save(sess_encode,modelpath) 
 		print("AutoEncode Model saved in path: %s" % save_path)
 	
-	encodes = sess_encode.run(tf_encoded,feed_dict={inputEmb:points})
-	print "encoded string is ",encodes[0]
+	encodes = sess_encode.run(self.tf_encoded,feed_dict={self.inputEmb:points})
+	
 	return encodes
     
 
@@ -217,13 +215,15 @@ class NccDiscrepancy(NonComp):
         self.y = tf.placeholder(tf.int32, [None])  #output class
         w1v = tf.nn.embedding_lookup(self.embedstf, self.w1) #Embedding table for words
         w2v = tf.nn.embedding_lookup(self.embedstf, self.w2) 
-	w12v = tf.nn.embedding_lookup(self.embedstf, self.w12) 
+	#w12v = tf.nn.embedding_lookup(self.embedstf, self.w12) 
+	self.w12v_encode = tf.placeholder(tf.float32, shape=(None, self.numClasses))
+
         yh = tf.nn.embedding_lookup(self.oneHot43, self.y) #One hot encodings embedding table for 43 classes
 	yh = tf.cast(yh,tf.float32)
 
 	#Neural Network 1
 	self.allhidden = self.numDim
-	self.hidden1 = 16*self.numDim
+	self.hidden1 = 2*self.numDim
 
 	matSize = self.hidden1 * self.numClasses  
         stddev = 1. / math.sqrt(matSize)
@@ -243,13 +243,13 @@ class NccDiscrepancy(NonComp):
 
 	#pred1_ = tf.concat(1,[w1v-w12v,w2v-w12v]) #Concatenate
 	pred1_ = tf.matmul(w1v,Wcomp1) + bcomp1
-	pred1_ = tf.map_fn(tf.sigmoid,pred1_)
+	pred1_ = tf.map_fn(tf.nn.relu,pred1_)
 	pred1 = tf.matmul(pred1_, W1) + b1
 	#pred1 = tf.nn.softmax(pred1)
 
 	#Neural Network 2
 
-	self.hidden2 = 16*self.numDim
+	self.hidden2 = 2*self.numDim
 
 	matSize = self.hidden2 * self.numClasses  
         stddev = 1. / math.sqrt(matSize)
@@ -267,20 +267,17 @@ class NccDiscrepancy(NonComp):
         stddev = 1. / math.sqrt(matSize)
 	bcomp2 = tf.Variable(tf.random_normal(shape=[self.hidden2],mean=0,stddev=stddev))
 
-	w1v_w12v_norm = tf.sqrt(tf.reduce_sum(tf.square(w1v-w12v), 0, keepdims=True))
-	w2v_w12v_norm = tf.sqrt(tf.reduce_sum(tf.square(w2v-w12v), 0, keepdims=True))
-
 	#pred2_ = tf.concat(1,[(w1v-w12v)/w1v_w12v_norm,(w2v-w12v)/w2v_w12v_norm]) #Concatenate
 	pred2_ = tf.matmul(w2v,Wcomp2) + bcomp2
-	pred2_ = tf.map_fn(tf.sigmoid,pred2_)
+	pred2_ = tf.map_fn(tf.nn.relu,pred2_)
 	pred2 = tf.matmul(pred2_, W2) + b2
 	#pred2 = tf.nn.softmax(pred2)
 
 
-	
+
 	#Neural Network 3
 
-	self.hidden3 = 16*self.numDim
+	self.hidden3 = 2*self.numDim
 
 	matSize = self.hidden3 * self.numClasses  
         stddev = 1. / math.sqrt(matSize)
@@ -290,38 +287,49 @@ class NccDiscrepancy(NonComp):
         stddev = 1. / math.sqrt(matSize)
 	b3 = tf.Variable(tf.random_normal(shape=[self.numClasses],mean=0,stddev=stddev))
 
-	matSize = 2 * self.numDim * self.hidden3  
+	matSize = self.numClasses * self.hidden3  
         stddev = 1. / math.sqrt(matSize)
-	Wcomp3 = tf.Variable(tf.random_normal(shape=[2*self.numDim,self.hidden3],mean=0,stddev=stddev))
+	Wcomp3 = tf.Variable(tf.random_normal(shape=[self.numClasses,self.hidden3],mean=0,stddev=stddev))
 
 	matSize = self.hidden3 
         stddev = 1. / math.sqrt(matSize)
 	bcomp3 = tf.Variable(tf.random_normal(shape=[self.hidden3],mean=0,stddev=stddev))
 
-        pred3 = tf.concat([w1v,w2v],1) #Concatenate
-
+        #pred3 = tf.concat([w1v,w2v],1) #Concatenate
+	pred3 = self.w12v_encode
 	pred3_ = tf.matmul(pred3,Wcomp3) + bcomp3
-	pred3_ = tf.map_fn(tf.sigmoid,pred3_)
+	pred3_ = tf.map_fn(tf.nn.relu,pred3_)
 	pred3 = tf.matmul(pred3_, W3) + b3
 	#pred3 = tf.nn.softmax(pred3)
 
-	self.alpha1 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
-	self.alpha2 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
-	self.alpha3 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
+	#self.alpha1 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
+	#self.alpha2 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
+	#self.alpha3 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
 
-	pred = self.alpha1*pred1 + self.alpha2*pred2 + self.alpha3*pred3
+	#pred = self.alpha1*pred1 + self.alpha2*pred2 + self.alpha3*pred3
+	pred = pred3
 	cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits = pred,labels = yh)
         cross_entropy = tf.reduce_mean(cross_entropy)
         self.loss = cross_entropy
         sgd = tf.train.AdamOptimizer(0.1)
 	#sgd = tf.train.FtrlOptimizer(.2,l1_regularization_strength=0.8,l2_regularization_strength=0.5)
-        self.trainop = sgd.minimize(self.loss, var_list=[self.alpha1,self.alpha2,self.alpha3,Wcomp1,bcomp1,W1,b1,Wcomp2,bcomp2,W2,b2,Wcomp3,bcomp3,W3,b3])
+        #self.trainop = sgd.minimize(self.loss, var_list=[self.alpha1,self.alpha2,self.alpha3,Wcomp1,bcomp1,W1,b1,Wcomp2,bcomp2,W2,b2,Wcomp3,bcomp3,W3,b3])
+	self.trainop = sgd.minimize(self.loss, var_list=[Wcomp3,bcomp3,W3,b3])
 
 	self.predprob = pred #will be used for prediction
 	
         self.initop = tf.initialize_all_variables()
         self.saver = tf.train.Saver(tf.trainable_variables())
         logging.info("Built Dima43 network.")
+
+    def getRandomCompMiniBatch(self, batchSize=28):
+        sample = np.random.randint(0, len(self.clY), batchSize)
+        sWid1 = [self.clW1[x] for x in sample]
+        sWid2 = [self.clW2[x] for x in sample]
+	sWid12 = [self.clW12[x] for x in sample]
+        sY = [self.clY[x] for x in sample]
+	sTrainIds = [self.trainIds[x] for x in sample]
+        return sWid1, sWid2, sWid12, sY, sTrainIds
 
     def doTrain(self, sess, maxIters=100000):
         tfModelDirPath = os.path.join(self.phrasesDir, self.flags.model)
@@ -345,42 +353,57 @@ class NccDiscrepancy(NonComp):
 
 	count = 0
 	for xiter in xrange(maxIters):
-		wid1, wid2, wid12, y = self.getRandomCompMiniBatch()
+		wid1, wid2, wid12, y, trainSampleIds = self.getRandomCompMiniBatch()
+		trainEncodings = [self.autoencodingsDict[i] for i in trainSampleIds]
 		_, trloss = sess.run([self.trainop, self.loss],
                                             feed_dict={self.w1: wid1,
                                                        self.w2: wid2,
 						       self.w12: wid12,
-                                                       self.y: y
+                                                       self.y: y,
+						       self.w12v_encode: trainEncodings
                                                        })
             	if xiter % 100 == 0:
-                	teloss = sess.run(self.loss,feed_dict={self.w1: self.caW1,
-                                                        	self.w2: self.caW2,
-						       		self.w12: self.caW12,
-                                                        	self.y: self.caY
-                                                        	})
-			logging.info("Dima43 xiter=%d trloss=%g teloss=%g",xiter, trloss, teloss) #trloss and teloss are numpy ndarrays of one element
-			
-			#Code for Early stopping for Dima43
-		
-			currAccuracy = self.get_3nn_f1(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
 
-			if(currAccuracy > prevAccuracy):
-				logging.info("")
-				prevAccuracy = currAccuracy
-				logging.info("Validation F1 => %g",prevAccuracy)
-                                testAccuracy = self.get_3nn_f1(sess,self.caW1,self.caW2,self.caW12,self.caY)
-                                logging.info("Test F1 => %g",testAccuracy)
-				self.saver.save(sess, tfModelPath)	
-				logging.info("")
-				count = 0
-			else:
-				count += 1
-				if(count > 200):
-					break
-			#tAccuracy = self.get_3nn_accuracy(sess,self.clW1,self.clW2,self.clW12,self.clY)
-			#print "training accuracy is ",tAccuracy
-			#if(tAccuracy > 0.92):
-				#break
+			
+
+			if(1):
+
+				embeddingsToEncode = []
+
+				for i in self.testIds:
+					embeddingsToEncode.append(np.concatenate((self.embeds[self.allw1[i]],self.embeds[self.allw2[i]])))
+				
+				testEncodings = sess.run(self.tf_encoded,feed_dict={self.inputEmb:embeddingsToEncode})
+
+				teloss = sess.run(self.loss,feed_dict={self.w1: self.caW1,
+									self.w2: self.caW2,
+									self.w12: self.caW12,
+									self.y: self.caY,
+						       			self.w12v_encode: testEncodings
+									})
+				
+				#Code for Early stopping for Dima43
+				logging.info("Dima43 xiter=%d trloss=%g teloss=%g",xiter, trloss,teloss) #trloss and teloss are numpy ndarrays of one element
+			
+				currAccuracy = self.get_3nn_f1(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY,self.devIds)
+
+				if(currAccuracy > prevAccuracy):
+					logging.info("")
+					prevAccuracy = currAccuracy
+					logging.info("Validation F1 => %g",prevAccuracy)
+					testAccuracy = self.get_3nn_f1(sess,self.caW1,self.caW2,self.caW12,self.caY,self.testIds)
+					logging.info("Test F1 => %g",testAccuracy)
+					self.saver.save(sess, tfModelPath)	
+					logging.info("")
+					count = 0
+				else:
+					count += 1
+					if(count > 200):
+						break
+				#tAccuracy = self.get_3nn_accuracy(sess,self.clW1,self.clW2,self.clW12,self.clY)
+				#print "training accuracy is ",tAccuracy
+				#if(tAccuracy > 0.92):
+					#break
 
 
     def moveTrainToTestFold(self):
@@ -394,17 +417,18 @@ class NccDiscrepancy(NonComp):
         del self.clW2[:]
         logging.warn("Updated train=%d test=%d folds", len(self.clY), len(self.caY))
 
-    def calClass(self,sess,w1,w2,w12,y):
-	probs = sess.run(self.predprob,feed_dict={self.w1: [w1],self.w2: [w2]})
+    def calClass(self,sess,w1,w2,w12,y,rowid):
+	encoding = sess.run(self.tf_encoded,feed_dict={self.inputEmb:[np.concatenate((self.embeds[self.allw1[rowid]],self.embeds[self.allw2[rowid]]))]})
+	probs = sess.run(self.predprob,feed_dict={self.w1: [w1],self.w2: [w2], self.w12v_encode: encoding})
 	predClass = np.argmax(probs[0])
 	return predClass
 
-    def get_3nn_f1(self,sess,w1s,w2s,w12s,ys):
+    def get_3nn_f1(self,sess,w1s,w2s,w12s,ys,rowids):
 	l = len(ys)
 	correctlabels = 0
 	predicted = []
 	for i in xrange(l):
-		predicted.append(self.calClass(sess,w1s[i],w2s[i],w12s[i],ys[i]))
+		predicted.append(self.calClass(sess,w1s[i],w2s[i],w12s[i],ys[i],rowids[i]))
 	return f1_score(ys, predicted, average='micro')
 
     def getConfusionMatrix(self,sess,w1s,w2s,w12s,ys):
@@ -491,8 +515,8 @@ def mainDima43(flags):
     with tf.Session() as sess:
 	print "Welcome to dima 43 classifier"
         nc = NccDiscrepancy(flags)
-	#print nc.flags.train
-        #if nc.flags.train: nc.doTrain(sess)
+	print nc.flags.train
+        if nc.flags.train: nc.doTrain(sess)
         #nc.doEval(sess)
 
 
