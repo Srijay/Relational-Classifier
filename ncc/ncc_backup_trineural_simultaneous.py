@@ -1,6 +1,6 @@
 # Implementation of dima classifier
 
-#python ncc_dima43_modified.py --indir /data/soumen/ncc/glove300 --phrases /data/srijayd/local_data/f_r1_r2_th/th/th.csv --model /data/srijayd/models/dima43_modified/ --resultDir /data/srijayd/results/cascade/result/dima43_modified/ --train true
+#python ncc_dima43_trimodel.py --indir /mnt/c/Users/srdeshp/Desktop/MLApps/Relational-Classifier/Embeddings/Wikipedia_Gigaword/glove.6B.50d.txt --phrases /mnt/c/Users/srdeshp/Desktop/MLApps/Relational-Classifier/f_r1_r2_th/th/th.csv --model /mnt/c/Users/srdeshp/Desktop/MLApps/Relational-Classifier/trineural_model/ --resultDir /mnt/c/Users/srdeshp/Desktop/MLApps/Relational-Classifier/ --train true
 
 #train - 70% dev - 10% test - 20%
 
@@ -134,7 +134,7 @@ class NccDiscrepancy(NonComp):
 	self.caW1, self.caW2, self.caW12, self.caY = [self.allw1[x] for x in ap], [self.allw2[x] for x in ap], [self.allw12[x] for x in ap], [self.ally[x] for x in ap]
 	print "Folding Finished"
 
-    def getRandomCompMiniBatch(self, batchSize=30):
+    def getRandomCompMiniBatch(self, batchSize=28):
         sample = np.random.randint(0, len(self.clY), batchSize)
         sWid1 = [self.clW1[x] for x in sample]
         sWid2 = [self.clW2[x] for x in sample]
@@ -153,10 +153,9 @@ class NccDiscrepancy(NonComp):
         yh = tf.nn.embedding_lookup(self.oneHot43, self.y) #One hot encodings embedding table for 43 classes
 	yh = tf.cast(yh,tf.float32)
 
-
 	#Neural Network 1
-	self.allhidden = 16*self.numDim
-	self.hidden1 = self.numClasses
+	self.allhidden = self.numDim
+	self.hidden1 = 16*self.numDim
 
 	matSize = self.hidden1 * self.numClasses  
         stddev = 1. / math.sqrt(matSize)
@@ -176,21 +175,13 @@ class NccDiscrepancy(NonComp):
 
 	#pred1_ = tf.concat(1,[w1v-w12v,w2v-w12v]) #Concatenate
 	pred1_ = tf.matmul(w1v,Wcomp1) + bcomp1
-	pred1_ = tf.map_fn(tf.nn.relu,pred1_)
-	pred1_ = tf.matmul(pred1_, W1) + b1
-	pred1 = tf.nn.softmax(pred1_)
-
-	cross_entropy1 = tf.nn.softmax_cross_entropy_with_logits(pred1_,yh)
-        cross_entropy1 = tf.reduce_mean(cross_entropy1)
-        self.loss1 = cross_entropy1
-        sgd1 = tf.train.AdagradOptimizer(.1)
-        self.trainop1 = sgd1.minimize(self.loss1, var_list=[Wcomp1,bcomp1])
-
-	
+	pred1_ = tf.map_fn(tf.sigmoid,pred1_)
+	pred1 = tf.matmul(pred1_, W1) + b1
+	#pred1 = tf.nn.softmax(pred1)
 
 	#Neural Network 2
 
-	self.hidden2 = self.numClasses
+	self.hidden2 = 16*self.numDim
 
 	matSize = self.hidden2 * self.numClasses  
         stddev = 1. / math.sqrt(matSize)
@@ -208,26 +199,20 @@ class NccDiscrepancy(NonComp):
         stddev = 1. / math.sqrt(matSize)
 	bcomp2 = tf.Variable(tf.random_normal(shape=[self.hidden2],mean=0,stddev=stddev))
 
-	w1v_w12v_norm = tf.sqrt(tf.reduce_sum(tf.square(w1v-w12v), 0, keep_dims=True))
-	w2v_w12v_norm = tf.sqrt(tf.reduce_sum(tf.square(w2v-w12v), 0, keep_dims=True))
+	w1v_w12v_norm = tf.sqrt(tf.reduce_sum(tf.square(w1v-w12v), 0, keepdims=True))
+	w2v_w12v_norm = tf.sqrt(tf.reduce_sum(tf.square(w2v-w12v), 0, keepdims=True))
 
 	#pred2_ = tf.concat(1,[(w1v-w12v)/w1v_w12v_norm,(w2v-w12v)/w2v_w12v_norm]) #Concatenate
 	pred2_ = tf.matmul(w2v,Wcomp2) + bcomp2
-	pred2_ = tf.map_fn(tf.nn.relu,pred2_)
-	pred2_ = tf.matmul(pred2_, W2) + b2
-	pred2 = tf.nn.softmax(pred2_)
-
-	cross_entropy2 = tf.nn.softmax_cross_entropy_with_logits(pred2_,yh)
-        cross_entropy2 = tf.reduce_mean(cross_entropy2)
-        self.loss2 = cross_entropy2
-        sgd2 = tf.train.AdagradOptimizer(.1)
-        self.trainop2 = sgd2.minimize(self.loss2, var_list=[Wcomp2,bcomp2])
+	pred2_ = tf.map_fn(tf.sigmoid,pred2_)
+	pred2 = tf.matmul(pred2_, W2) + b2
+	#pred2 = tf.nn.softmax(pred2)
 
 
 	
 	#Neural Network 3
 
-	self.hidden3 = self.allhidden
+	self.hidden3 = 16*self.numDim
 
 	matSize = self.hidden3 * self.numClasses  
         stddev = 1. / math.sqrt(matSize)
@@ -245,36 +230,26 @@ class NccDiscrepancy(NonComp):
         stddev = 1. / math.sqrt(matSize)
 	bcomp3 = tf.Variable(tf.random_normal(shape=[self.hidden3],mean=0,stddev=stddev))
 
-
-        pred3 = tf.concat(1,[w1v,w2v]) #Concatenate
+        pred3 = tf.concat([w1v,w2v],1) #Concatenate
 
 	pred3_ = tf.matmul(pred3,Wcomp3) + bcomp3
-	pred3_ = tf.map_fn(tf.nn.relu,pred3_)
-	pred3_ = tf.matmul(pred3_, W3) + b3
-	pred3 = tf.nn.softmax(pred3_)
-
-	cross_entropy3 = tf.nn.softmax_cross_entropy_with_logits(pred3_,yh)
-        cross_entropy3 = tf.reduce_mean(cross_entropy3)
-        self.loss3 = cross_entropy3
-        sgd3 = tf.train.AdagradOptimizer(.1)
-        self.trainop3 = sgd3.minimize(self.loss3, var_list=[Wcomp3,bcomp3,W3,b3])
-
-	#Combine all with alphas
+	pred3_ = tf.map_fn(tf.sigmoid,pred3_)
+	pred3 = tf.matmul(pred3_, W3) + b3
+	#pred3 = tf.nn.softmax(pred3)
 
 	self.alpha1 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
 	self.alpha2 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
 	self.alpha3 = tf.Variable(tf.random_normal(shape=[1,self.numClasses],mean=0,stddev=1./math.sqrt(self.numClasses)))
 
-	self.pred = self.alpha1*pred1 + self.alpha2*pred2 + self.alpha3*pred3
-	cross_entropy = tf.nn.softmax_cross_entropy_with_logits(self.pred,yh)
+	pred = self.alpha1*pred1 + self.alpha2*pred2 + self.alpha3*pred3
+	cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits = pred,labels = yh)
         cross_entropy = tf.reduce_mean(cross_entropy)
         self.loss = cross_entropy
-        sgd = tf.train.AdagradOptimizer(0.1)
-        self.trainop = sgd.minimize(self.loss, var_list=[self.alpha1,self.alpha2,self.alpha3])
+        sgd = tf.train.AdamOptimizer(0.1)
+	#sgd = tf.train.FtrlOptimizer(.2,l1_regularization_strength=0.8,l2_regularization_strength=0.5)
+        self.trainop = sgd.minimize(self.loss, var_list=[self.alpha1,self.alpha2,self.alpha3,Wcomp1,bcomp1,W1,b1,Wcomp2,bcomp2,W2,b2,Wcomp3,bcomp3,W3,b3])
 
-	self.pred1 = pred1 #will be used for prediction
-	self.pred2 = pred2
-	self.pred3 = pred3
+	self.predprob = pred #will be used for prediction
 	
         self.initop = tf.initialize_all_variables()
         self.saver = tf.train.Saver(tf.trainable_variables())
@@ -286,119 +261,20 @@ class NccDiscrepancy(NonComp):
         if not os.path.isdir(tfModelDirPath): os.mkdir(tfModelDirPath)
 	sess.run(self.initop, feed_dict={self.place: self.embeds})
 
-        tfModelPath = os.path.join(tfModelDirPath, 'compmodel.tf')
-        if os.path.exists(tfModelPath):
-            self.saver.restore(sess, tfModelPath)
-            logging.info("Warmstart from %s", tfModelPath)
-	    print "Welcome to training"
+        tfModelPath = os.path.join(tfModelDirPath, 'compmodel2.tf')
 
-	print "Training 1 Started"
-	prevAccuracy = 0 
-	count = 0
-	for xiter in xrange(maxIters):
-		wid1, wid2, wid12, y = self.getRandomCompMiniBatch()
-		_, trloss = sess.run([self.trainop1, self.loss1],
-                                            feed_dict={self.w1: wid1,
-                                                       self.w2: wid2,
-						       self.w12: wid12,
-                                                       self.y: y
-                                                       })
-            	if xiter % 100 == 0:
-                	teloss = sess.run(self.loss1,feed_dict={self.w1: self.caW1,
-                                                        	self.w2: self.caW2,
-						       		self.w12: self.caW12,
-                                                        	self.y: self.caY
-                                                        	})
-			logging.info("Dima43 xiter=%d trloss=%g teloss=%g",xiter, trloss, teloss) #trloss and teloss are numpy ndarrays of one element
-			
-			#Code for Early stopping for Dima43
-		
-			currAccuracy = self.get_nn1_accuracy(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
+        if (0):
+        	self.saver.restore(sess, tfModelPath)
+            	logging.info("Warmstart from %s", tfModelPath)
+	    	print "Welcome to training"
 
-			if(currAccuracy > prevAccuracy):
-				prevAccuracy = currAccuracy
-				self.saver.save(sess, tfModelPath)	
-				logging.info("")
-				logging.info("Validation Accuracy => %g",prevAccuracy)
-				logging.info("")
-				count = 0
-			else:
-				count += 1
-				if(count > 100):
-					break
+	    	print "Training Started"
+		prevAccuracy = self.get_3nn_accuracy(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
+	    	
+	    	print "previous accuracy is ",prevAccuracy
+	else:
+	    	prevAccuracy = 0
 
-	print "Training 2 Started"
-	prevAccuracy = 0 
-	count = 0
-	for xiter in xrange(maxIters):
-		wid1, wid2, wid12, y = self.getRandomCompMiniBatch()
-		_, trloss = sess.run([self.trainop2, self.loss2],
-                                            feed_dict={self.w1: wid1,
-                                                       self.w2: wid2,
-						       self.w12: wid12,
-                                                       self.y: y
-                                                       })
-            	if xiter % 200 == 0:
-                	teloss = sess.run(self.loss2,feed_dict={self.w1: self.caW1,
-                                                        	self.w2: self.caW2,
-						       		self.w12: self.caW12,
-                                                        	self.y: self.caY
-                                                        	})
-			logging.info("Dima43 xiter=%d trloss=%g teloss=%g",xiter, trloss, teloss) #trloss and teloss are numpy ndarrays of one element
-			
-			#Code for Early stopping for Dima43
-		
-			currAccuracy = self.get_nn2_accuracy(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
-
-			if(currAccuracy > prevAccuracy):
-				prevAccuracy = currAccuracy
-				self.saver.save(sess, tfModelPath)	
-				logging.info("")
-				logging.info("Validation Accuracy => %g",prevAccuracy)
-				logging.info("")
-				count = 0
-			else:
-				count += 1
-				if(count > 100):
-					break
-
-	print "Training 3 Started"
-	prevAccuracy = 0 
-	count = 0
-	for xiter in xrange(maxIters):
-		wid1, wid2, wid12, y = self.getRandomCompMiniBatch()
-		_, trloss = sess.run([self.trainop3, self.loss3],
-                                            feed_dict={self.w1: wid1,
-                                                       self.w2: wid2,
-						       self.w12: wid12,
-                                                       self.y: y
-                                                       })
-            	if xiter % 200 == 0:
-                	teloss = sess.run(self.loss3,feed_dict={self.w1: self.caW1,
-                                                        	self.w2: self.caW2,
-						       		self.w12: self.caW12,
-                                                        	self.y: self.caY
-                                                        	})
-			logging.info("Dima43 xiter=%d trloss=%g teloss=%g",xiter, trloss, teloss) #trloss and teloss are numpy ndarrays of one element
-			
-			#Code for Early stopping for Dima43
-		
-			currAccuracy = self.get_nn3_accuracy(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
-
-			if(currAccuracy > prevAccuracy):
-				prevAccuracy = currAccuracy
-				self.saver.save(sess, tfModelPath)	
-				logging.info("")
-				logging.info("Validation Accuracy => %g",prevAccuracy)
-				logging.info("")
-				count = 0
-			else:
-				count += 1
-				if(count > 100):
-					break
-
-	print "Overall Training Started"
-	prevAccuracy = 0 
 	count = 0
 	for xiter in xrange(maxIters):
 		wid1, wid2, wid12, y = self.getRandomCompMiniBatch()
@@ -408,7 +284,7 @@ class NccDiscrepancy(NonComp):
 						       self.w12: wid12,
                                                        self.y: y
                                                        })
-            	if xiter % 200 == 0:
+            	if xiter % 100 == 0:
                 	teloss = sess.run(self.loss,feed_dict={self.w1: self.caW1,
                                                         	self.w2: self.caW2,
 						       		self.w12: self.caW12,
@@ -421,17 +297,23 @@ class NccDiscrepancy(NonComp):
 			currAccuracy = self.get_3nn_accuracy(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
 
 			if(currAccuracy > prevAccuracy):
-				prevAccuracy = currAccuracy
-				self.saver.save(sess, tfModelPath)	
 				logging.info("")
+				prevAccuracy = currAccuracy
 				logging.info("Validation Accuracy => %g",prevAccuracy)
+                                testAccuracy = self.get_3nn_f1(sess,self.caW1,self.caW2,self.caW12,self.caY)
+                                logging.info("Test Accuracy => %g",testAccuracy)
+				self.saver.save(sess, tfModelPath)	
 				logging.info("")
 				count = 0
 			else:
 				count += 1
-				if(count > 100):
+				if(count > 200):
 					break
-    	
+			#tAccuracy = self.get_3nn_accuracy(sess,self.clW1,self.clW2,self.clW12,self.clY)
+			#print "training accuracy is ",tAccuracy
+			#if(tAccuracy > 0.92):
+				#break
+
 
     def moveTrainToTestFold(self):
         """Empties training fold into test fold."""
@@ -444,129 +326,35 @@ class NccDiscrepancy(NonComp):
         del self.clW2[:]
         logging.warn("Updated train=%d test=%d folds", len(self.clY), len(self.caY))
 
-
-    '''
     def calClass(self,sess,w1,w2,w12,y):
-	p1 = sess.run(self.pred1,feed_dict={self.w1: [w1],self.w2: [w2],self.w12: [w12]})
-	p2 = sess.run(self.pred2,feed_dict={self.w1: [w1],self.w2: [w2],self.w12: [w12]})
-	p3 = sess.run(self.pred3,feed_dict={self.w1: [w1],self.w2: [w2],self.w12: [w12]})
-	p1 = p1[0]
-	p2 = p2[0]
-	p3 = p3[0]
-	predClass = 0
-	maxprob = 0
-	clsanal = 6 #Class To Analyze
-	p1_=p2_=p3_=1
-	p1a = p2a = p3a = 1
-	probActualClass = 0
-	for i in xrange(self.numClasses):
-		#a1,a2,a3 = self.class_coefficients[i]
-		#a1,a2,a3 = 1.0/3,1.0/3,1.0/3
-		a1,a2,a3 = 0.25,0.25,0.5  
-		prob = a1*p1[i] + a2*p2[i] + a3*p3[i]
-		if((y==clsanal)and(i==y)):
-			probActualClass = prob
-			p1a = p1[i]
-			p2a = p2[i]
-			p3a = p3[i]
-		if(prob > maxprob):
-			predClass = i
-			maxprob = prob
-			p1_=p1[i]
-			p2_=p2[i]
-			p3_=p3[i]
-
-	if((y==clsanal)):#and(y!=predClass)):
-		#print "compound is ",self.vocabArray[w12].word
-		print "maxprob is ",maxprob
-		print "p1 is ",p1_
-		print "p2 is ",p2_
-		print "p3 is ",p3_
-		print "predclass is ",self.Classes[predClass]
-		print "But Actual class is ",self.Classes[clsanal]
-		print "Actual Class Prob is ",probActualClass
-		print "Actual class weights are "
-		print "p1a is ",p1a
-		print "p2a is ",p2a
-		print "p3a is ",p3a
-		print "-------------------------"
-	
-	return predClass
-
-	'''
-
-    def calClass(self,sess,w1,w2,w12,y):
-	probs = sess.run(self.pred,feed_dict={self.w1: [w1],self.w2: [w2]})
+	probs = sess.run(self.predprob,feed_dict={self.w1: [w1],self.w2: [w2]})
 	predClass = np.argmax(probs[0])
-	probmax = np.max(probs[0])*1.0/np.sum(probs[0])
 	return predClass
 
-    def get_3nn_accuracy(self,sess,w1s,w2s,w12s,ys):
+    def get_3nn_f1(self,sess,w1s,w2s,w12s,ys):
 	l = len(ys)
 	correctlabels = 0
 	predicted = []
 	for i in xrange(l):
 		predicted.append(self.calClass(sess,w1s[i],w2s[i],w12s[i],ys[i]))
-	return recall_score(ys, predicted, average='micro')
-
-    def calClass_1(self,sess,w1,w2,w12,y):
-	probs = sess.run(self.pred1,feed_dict={self.w1: [w1],self.w2: [w2],self.w12: [w12]})
-	predClass = np.argmax(probs[0])
-	return predClass
-
-    def calClass_2(self,sess,w1,w2,w12,y):
-	probs = sess.run(self.pred2,feed_dict={self.w1: [w1],self.w2: [w2],self.w12: [w12]})
-	predClass = np.argmax(probs[0])
-	return predClass
-
-    def calClass_3(self,sess,w1,w2,w12,y):
-	probs = sess.run(self.pred3,feed_dict={self.w1: [w1],self.w2: [w2],self.w12: [w12]})
-	predClass = np.argmax(probs[0])
-	return predClass
-
-    def get_nn1_accuracy(self,sess,w1s,w2s,w12s,ys):
-	l = len(ys)
-	correctlabels = 0
-	predicted = []
-	for i in xrange(l):
-		predicted.append(self.calClass_1(sess,w1s[i],w2s[i],w12s[i],ys[i]))
-	return recall_score(ys, predicted, average='micro')
-
-    def get_nn2_accuracy(self,sess,w1s,w2s,w12s,ys):
-	l = len(ys)
-	correctlabels = 0
-	predicted = []
-	for i in xrange(l):
-		predicted.append(self.calClass_2(sess,w1s[i],w2s[i],w12s[i],ys[i]))
-	return recall_score(ys, predicted, average='micro')
-
-    def get_nn3_accuracy(self,sess,w1s,w2s,w12s,ys):
-	l = len(ys)
-	correctlabels = 0
-	predicted = []
-	for i in xrange(l):
-		predicted.append(self.calClass_3(sess,w1s[i],w2s[i],w12s[i],ys[i]))
-	return recall_score(ys, predicted, average='micro')
+	return f1_score(ys, predicted, average='micro')
 
     def getConfusionMatrix(self,sess,w1s,w2s,w12s,ys):
 	l = len(ys)
 	correctlabels = 0
 	predicted = []
 	for i in xrange(l):
-		predclass = self.calClass(sess,w1s[i],w2s[i],w12s[i],ys[i])
-		predicted.append(predclass)
+		predicted.append(self.calClass(sess,w1s[i],w2s[i],w12s[i],ys[i]))
 	return confusion_matrix(ys,predicted)
 
-    def getF1Scores(self,sess,w1s,w2s,w12s,ys):
+    def getMicroAveragedF1Score(self,sess,w1s,w2s,w12s,ys):
 	l = len(ys)
 	correctlabels = 0
 	predicted = []
 	for i in xrange(l):
 		predicted.append(self.calClass(sess,w1s[i],w2s[i],w12s[i],ys[i]))
-	print "here precision and recall are"
-	print  precision_score(ys, predicted, average='micro')
-	print  recall_score(ys, predicted, average='micro')
-	return f1_score(ys,predicted, average=None)
+
+	return f1_score(ys,predicted, average=micro)
 
     def getClassesAccuracies(self,cm): 
        	ind = 0
@@ -591,53 +379,21 @@ class NccDiscrepancy(NonComp):
 		ind += 1
 	return (correct*1.0)/total
 
-    def makeResult(self,resultPath,cm,classF1Scores):
-	outcmfile = open(resultPath+"result_dima43.csv",'w')
-	outcmfile.write("Total Accuracy => ," + str(self.getAccuracy(cm)) + "\n\n")
-	outcmfile.write("Class F1 Scores are => ")
-	for ind in xrange(len(classF1Scores)):
-		outcmfile.write(self.Classes[ind]+","+str(classF1Scores[ind]) + "\n")
-	outcmfile.write("\n")
-	outcmfile.write("Confusion Matrix =>,")
-	headClasses = ""
-	for clss in self.Classes:
-		headClasses = headClasses + clss + ","
-	headClasses = headClasses[:len(headClasses)-1]
-	outcmfile.write(headClasses + "\n")
-	ind = 0
-	for row in cm:
-		line = self.Classes[ind] + ","
-		for score in cm[ind]:
-			line = line + str(score) + ","
-		line = line[:len(line)-1]
-		outcmfile.write(line + "\n")
-		ind+=1
-	outcmfile.close()
-	outbarchart = resultPath + "barchart_dima43.png" #output png file
-	y_pos = np.arange(len(list(self.Classes)))
-
-	assert len(y_pos) == len(classF1Scores)
-	plt.bar(y_pos, classF1Scores,width=0.5,alpha=0.5)
-	plt.xticks(y_pos,self.Classes,rotation='vertical')
-	plt.ylabel('F1-Scores')
-	plt.title('Class F1 Scores') 
-	plt.show()
-	plt.savefig(outbarchart)
-
 
     def doEval(self,sess):
-
-	self.class_coefficients = {0:(0.5,0,0.5),1:(0,0.5,0.5),2:(0,0,1),3:(0,0,1),4:(0,0,1),5:(0,0,1),6:(0,0,1),7:(0,0,1),8:(0,1,0),9:(0,1,0),10:(0,1,0),11:(0,0,1),12:(0,0,1),13:(0,0,1),14:(1.0/3,1.0/3,1.0/3),15:(1,0,0),16:(0,0,1),17:(0,0,1),18:(0,1,0),19:(0,0,1),20:(1.0/3,1.0/3,1.0/3),21:(1.0/3,1.0/3,1.0/3),22:(0,0,1),23:(0,1,0),24:(0,0,1),25:(0,1,0),26:(0,1,0),27:(0,0,1),28:(0,1,0),29:(1,0,0),30:(1.0/3,1.0/3,1.0/3),31:(0,1,0),32:(0,0,1),33:(1.0/3,1.0/3,1.0/3),34:(0,0,1)} #2
 
     	print "Welcome to Eval"
         tfModelDirPath = os.path.join(self.phrasesDir, self.flags.model)
         if not os.path.isdir(tfModelDirPath): os.mkdir(tfModelDirPath)
-        tfModelPath = os.path.join(tfModelDirPath, 'compmodel.tf')
+        tfModelPath = os.path.join(tfModelDirPath, 'compmodel2.tf')
         #assert os.path.exists(tfModelPath), 'Cannot load ' + tfModelPath
         self.saver.restore(sess, tfModelPath)
         logging.info("Warmstart from %s", tfModelPath)
 
         #sess.run(self.initop)
+	a1 = sess.run(self.alpha1)
+	a2 = sess.run(self.alpha2)
+	a3 = sess.run(self.alpha3)
 
 	sess.run(tf.initialize_variables([self.embedstf]),feed_dict={self.place: self.embeds})     #For pretrained word embeddings
 
@@ -645,23 +401,23 @@ class NccDiscrepancy(NonComp):
             #self.moveTrainToTestFold()
 
 	#Confusion Matrix to get Accuracies
-	#f1scores = self.getF1Scores(sess,self.caW1,self.caW2,self.caW12,self.caY)
+	f1scores = self.getMicroAveragedF1Score(sess,self.caW1,self.caW2,self.caW12,self.caY)
 
 	cm = self.getConfusionMatrix(sess,self.caW1,self.caW2,self.caW12,self.caY)
+	print "Total Test Accuracy => ",str(self.getAccuracy(cm))
 
-	#cm_train = self.getConfusionMatrix(sess,self.clW1,self.clW2,self.clW12,self.clY)
+	cm_train = self.getConfusionMatrix(sess,self.clW1,self.clW2,self.clW12,self.clY)
+	print "training accuracy is ",self.getAccuracy(cm_train)
 
-	#print "training accuracy is ",self.getAccuracy(cm_train)
-	print "Total Accuracy => ",str(self.getAccuracy(cm))
+	cm_valid = self.getConfusionMatrix(sess,self.cdW1,self.cdW2,self.cdW12,self.cdY)
+	print "validation accuracy is ",self.getAccuracy(cm_valid)
 
 	print "Class Accuracies are "
 	print self.getClassesAccuracies(cm)
 
-	#print "Class F1 Scores are "
-	#print f1scores
-	
-	#self.makeResult(self.flags.resultDir,cm,f1scores)
-	
+	print "Micro average f1 measure is "
+	print f1scores
+		
 
 def mainDima43(flags):
     with tf.Session() as sess:
@@ -690,7 +446,6 @@ if __name__ == "__main__":
     parser.add_argument("--resultDir", required=True, type=str,
                         help='/path/to/cascade/model/result/') #default - /data/srijayd/cascade/result/baseline/
     args = parser.parse_args()
-    print args.train
     mainDima43(args)
 
 

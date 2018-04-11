@@ -48,39 +48,38 @@ class PhraseBase(object):
         logging.info('Begin %s.__init__', 'PhraseBase')
         self.flags = flags
         assert self.flags.indir is not None
-        self.loadVocabulary() #-----commented to use stanford glove
-        self.loadEmbeddings() #-----commented to use stanford glove
-        #self.readStanfordGlove() # to use stanford glove embeddings
+        #self.loadVocabulary() #-----commented to use stanford glove
+        #self.loadEmbeddings() #-----commented to use stanford glove
+        self.readStanfordGlove() # to use stanford glove embeddings
         # Embeddings not loaded into TF matrix at init.
         # But we create a variable with a placeholder.
         self.place = tf.placeholder(tf.float32, shape=self.embeds.shape)
-        self.embedstf = tf.Variable(self.place, name='embedstf', trainable=False)
+        #self.embedstf = tf.Variable(self.place, name='embedstf', trainable=False)
         logging.info('End %s.__init__', 'PhraseBase')
 
     def readStanfordGlove(self):
         self.vocabArray = []
         self.vocabMap = {}
         self.embeds = []
-        infile = open("/data/srijayd/Mikolov_word2vec/vectors.txt","r")
+        infile = open(self.flags.indir,"r")
         i = 0
         for line in infile:
             line = line.split(" ")
-	    if(len(line)==2):
+	    if(len(line)<=2):
 	    	continue
             word = line[0]
-	    #if word in self.wordToBeExcluded:
-	    	#continue
-            embed = line[1:][:-1]
+            embed = line[1:]
             embed = map(float,embed)
             self.vocabArray.append(word)
             self.vocabMap[word] = i
             i+=1
             self.embeds.append(embed)
         print "All is well"
-	#sprint "size of excluded words is ",len(self.wordToBeExcluded)
         self.numDim = len(self.embeds[0])
         self.vocabSize = len(self.vocabArray)
         self.embeds = np.array(self.embeds)    
+        print "Embed size is ",self.numDim 
+        print "vocabulary size is ",self.vocabSize," and embedsize is ",self.numDim
 
     def loadVocabulary(self):
         self.vocabMap = { }
